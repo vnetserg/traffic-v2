@@ -10,6 +10,18 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import classification_report
 
 def preprocess(data, seed=None):
+    '''
+        Осуществить предварительную очистку данных,
+        масштабирование и маркировку.
+        Аргументы:
+            data - DataFrame таблицы признаков
+            seed - семя генератора псевдослучайных чисел
+        Возвращает:
+            DataFrame с обработанной таблицей признаков,
+            StandardScaler,
+            LabelEncoder
+    '''
+
     # Избавляемся от ненужных протоколов:
     drop_protos = ["Unknown", "Unencryped_Jabber", "NTP", "Apple"]
     replace_protos = [("SSL_No_Cert", "SSL")]
@@ -33,6 +45,16 @@ def preprocess(data, seed=None):
                 ps.DataFrame({"proto": y})], axis=1), scaler, labeler
 
 def split_data(data):
+    '''
+        Разделить таблицу признаков в пропорции 1:2
+        так, чтобы эта пропорция соблюдалась для
+        каждого протокола в отдельности.
+        Аргументы:
+            data - DataFrame таблицы признаков
+        Возвращает:
+            Два DataFrame, первый резмером 1/3 от
+            исходного, второй размером 2/3
+    '''
     proto_clusters = [data[data["proto"] == proto] for proto in data["proto"].unique()]
     train_clusters = []
     test_clusters = []
@@ -44,7 +66,15 @@ def split_data(data):
     data_test = ps.concat(test_clusters)
     return data_train, data_test
 
-def train_model(data_train, seed):
+def train_model(data_train, seed=None):
+    '''
+        Обучить модель на таблице признаков.
+        Аргументы:
+            data_train - DataFrame обучающей выборки
+            seed - семя генератора псевдослучайных чисел
+        Возвращает:
+            Обученную модель RandomForest
+    '''
     X_train = data_train.drop(["proto"], axis=1)
     y_train = data_train["proto"]
     model = RandomForestClassifier(27, "entropy", 9, random_state=seed)
@@ -52,6 +82,19 @@ def train_model(data_train, seed):
     return model
 
 def score_model(model, data_test, labeler):
+    '''
+        Оценить производительность модели,
+        выведя в стандартный вывод три таблицы:
+        важности признаков, значения полноты и
+        точности для каждого класса, реальные
+        и предсказанные классы.
+        Аргументы:
+            model - обученная модель
+            data_test - проверочаня выборка
+            labeler - LabelEncoder данной выборки
+        Возвращает:
+            Ничего
+    '''
     X_test = data_test.drop(["proto"], axis=1)
     y_test = data_test["proto"]
     y_predicted = model.predict(X_test)
@@ -64,6 +107,15 @@ def score_model(model, data_test, labeler):
     print cross_class_report(true_labels, predicted_labels)
 
 def cross_class_report(y, p):
+    '''
+        Составить таблицу реальных и предсказанных
+        классов.
+        Аргументы:
+            y - numpy-массив реальных меток классов
+            p - numpy-массив предсказанных меток классов
+        Возвращает:
+            DataFrame
+    '''
     classes = np.unique(y)
     res = ps.DataFrame({"y": y, "p": p}, index=None)
     table = ps.DataFrame(index=classes, columns=classes)
@@ -74,10 +126,19 @@ def cross_class_report(y, p):
     return table
 
 def feature_importances_report(model, columns):
+    '''
+        Составить отчёт о важности признаков.
+        Аргументы:
+            model - обученная модель RandomForest
+            columns - список текстовых наименований
+                признаков
+        Возвращает:
+            Отчёт в виде строки
+    '''
     imp = {col: imp for imp, col
         in zip(model.feature_importances_, columns)}
     assert len(imp) == len(columns)
-    return "\n".join("{}{}".format(str(col).ljust(25), imp)
+    return "\n".join("{}{:.4f}".format(str(col).ljust(25), imp)
         for col, imp in sorted(imp.items(), key=(lambda x: -x[1])))
 
 def main():

@@ -8,27 +8,80 @@ from subprocess import Popen, PIPE, call
 import pandas as ps
 import numpy as np
 
+
+# Полный список характеристик потока:
 FEATURES = [
-    "proto", "subproto",
-    "bulk0", "bulk1", "bulk2", "bulk3",
-    "client_packet0", "client_packet1",
-    "server_packet0", "server_packet1",
-    "client_bulksize_avg", "client_bulksize_dev",
-    "server_bulksize_avg", "server_bulksize_dev",
-    "client_packetsize_avg", "client_packetsize_dev",
-    "server_packetsize_avg", "server_packetsize_dev",
-    "client_packets_per_bulk", "server_packets_per_bulk",
-    "client_effeciency", "server_efficiency",
-    "byte_ratio", "payload_ratio", "packet_ratio",
-    "client_bytes", "client_payload", "client_packets", "client_bulks",
-    "server_bytes", "server_payload", "server_packets", "server_bulks",
-    "is_tcp"
+    "proto", # протокол прикладного уровня
+    "subproto", # дополнительный протокол, nDPI его даёт, но не всегда.
+                # сейчас никак не используется
+    "bulk0", # размер первой порции данных со стороны клиента
+    "bulk1", # размер первой порции данных со стороны сервера
+    "bulk2", # размер второй порции данных со стороны клиента
+    "bulk3", # размер второй порции данных со стороны сервера
+    "client_packet0", # размер первого сегмента со стороны клиента
+    "client_packet1", # размер второго сегмента со стороны клиента
+    "server_packet0", # размер первого сегмента со стороны сервера
+    "server_packet1", # размер второго сегмента со стороны сервера
+    "client_bulksize_avg", # средный размер порции данных со стороны клиента
+    "client_bulksize_dev", # стандартное отклонение размера порции
+                           # данных со стороны клиента
+    "server_bulksize_avg", # средный размер порции данных со стороны сервера
+    "server_bulksize_dev", # стандартное отклонение размера порции
+                           # данных со стороны сервера
+    "client_packetsize_avg", # средный размер сегмента со стороны клиента
+    "client_packetsize_dev", # стандартное отклонение размера сегмента
+                             # со стороны клиента
+    "server_packetsize_avg", # средний размер сегмента со стороны сервера
+    "server_packetsize_dev", # стандартное отклонение размера сегмента
+                             # со стороны сервера
+    "client_packets_per_bulk", # среднее количество сегментов на порцию
+                               # данных со стороны клиента
+    "server_packets_per_bulk", # среднее количество сегментов на порцию
+                               # данных со стороны сервера
+    "client_effeciency", # КПД клиента
+    "server_efficiency", # КПД сервера
+    "byte_ratio", # во сколько раз клиент передал больше байт, чем сервер
+    "payload_ratio", # во сколько раз клиент передал больше полезной нагрузки, чем сервер
+    "packet_ratio", # во сколько раз клиент передал больше сегментов, чем сервер
+    "client_bytes", # сколько байт суммарно передано клиентом
+    "client_payload", # сколько полезной нагрузки суммарно передано клиентом
+    "client_packets", # сколько сегментов суммарно передано клиентом
+    "client_bulks", # сколько порций данных суммарно передано клиентом
+    "server_bytes", # сколько байт суммарно передано сервером
+    "server_payload", # сколько полезной нагрузки суммарно передано сервером
+    "server_packets", # сколько сегментов суммарно передано сервером
+    "server_bulks", # сколько порций данных суммарно передано сервером
+    "is_tcp" # используется ли TCP на транспортном уровне
+             # (0 означает UDP, другие протоколы не рассматриваются)
 ]
 
 def ip_from_string(ips):
+    '''
+        Преобразовать символьное представление IP-адреса
+        в четырёхбайтную строку.
+        Аргументы:
+            ips - IP-адрес в виде строки (например: '10.0.0.1')
+        Возвращает:
+            строку из 4 байт
+    '''
     return "".join(chr(int(n)) for n in ips.split("."))
 
 def parse_flows(pcapfile):
+    '''
+        Прочитать данный файл PCAP, разделить его на потоки
+        транспортного уровня и определить прикладной протокол
+        каждого потока.
+        Аргументы:
+            pcapfile - путь к файлу PCAP (строка)
+        Возвращает (генерирует):
+            Список кортежей вида:
+            (
+                протокол прикладного уровня,
+                дополнительный протокол,
+                список Ethernet-фреймов
+            )
+    '''
+
     pipe = Popen(["ndpiReader", "-i", pcapfile, "-v2"], stdout=PIPE)
     raw = pipe.communicate()[0].decode("utf-8")
     reg = re.compile(r'(UDP|TCP) (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d{1,5}) <-> (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d{1,5}) \[proto: [\d+\.]*\d+\/(\w+\.?\w+)*\]')
@@ -72,6 +125,19 @@ def parse_flows(pcapfile):
         yield apps[key][0], apps[key][1], flow
 
 def forge_flow_stats(flow, strip = 0):
+    '''
+        Рассчитать статистические метрики потока.
+        Аргументы:
+            flow - список Ethernet-фреймов
+            strip - количество первых фреймов, по которым   
+                строить таблицу признаков (если меньше 1,
+                то фреймы не отбрасываются)
+        Возвращает:
+            Словарь, в котором ключи - названия метрик,
+            значения - значения этих метрик.
+            Если в потоке нет хотя бы двух порций данных,
+            возвращает None.
+    '''
     ip = flow[0].data
     seg = ip.data
     if isinstance(seg, dpkt.tcp.TCP):
