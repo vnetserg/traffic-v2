@@ -46,25 +46,23 @@ def preprocess(data, seed=None):
 
 def split_data(data):
     '''
-        Разделить таблицу признаков в пропорции 1:2
-        так, чтобы эта пропорция соблюдалась для
-        каждого протокола в отдельности.
+        Разделить таблицу признаков на три части
+        так, чтобы каждый протокол одинаково
+        присутствовал в каждой части.
         Аргументы:
             data - DataFrame таблицы признаков
         Возвращает:
-            Два DataFrame, первый резмером 1/3 от
-            исходного, второй размером 2/3
+            Список из трёх DataFrame, каждый
+            размером 1/3 от оригинала
     '''
     proto_clusters = [data[data["proto"] == proto] for proto in data["proto"].unique()]
-    train_clusters = []
-    test_clusters = []
+    clusters = [[], [], []]
     for cluster in proto_clusters:
         split_index = len(cluster)//3
-        train_clusters.append(cluster.iloc[:split_index])
-        test_clusters.append(cluster.iloc[split_index:])
-    data_train = ps.concat(train_clusters)
-    data_test = ps.concat(test_clusters)
-    return data_train, data_test
+        for i in range(3):
+            clusters[i].append(
+                cluster.iloc[i*split_index : (i+1)*split_index])
+    return [ps.concat(clus) for clus in clusters]
 
 def train_model(data_train, seed=None):
     '''
@@ -150,9 +148,13 @@ def main():
 
     data = ps.read_csv(args.file)
     data, scaler, labeler = preprocess(data, args.random)
-    data_train, data_test = split_data(data)
-    model = train_model(data_train, args.random)
-    score_model(model, data_test, labeler)
+
+    clusters = split_data(data)
+    for i, data_train in enumerate(clusters):
+        print("\n\n*** FOLD: {} ***\n".format(i+1))
+        data_test = ps.concat([c for c in clusters if c is not data_train])
+        model = train_model(data_train, args.random)
+        score_model(model, data_test, labeler)
 
     if args.output:
         pickle.dump((model, scaler, labeler), open(args.output, "wb"))
